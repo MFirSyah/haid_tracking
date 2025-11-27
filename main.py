@@ -1,254 +1,264 @@
 import streamlit as st
-import time
 import pandas as pd
-from datetime import date
-
-# Import modul buatan sendiri
+import time
+from datetime import datetime
+from db_connect import test_connection
 from auth import login_user, register_user
-from db_connect import supabase
-from crud import create_cycle, get_user_cycles, delete_cycle
-from prediction import calculate_prediction 
-from email_service import add_notification_rule, get_user_notifications, send_email_notification
-from scheduler import run_daily_automation 
+from crud import create_cycle, get_user_cycles, delete_cycles_bulk, add_notification_rule, get_user_notifications, update_notification_rule, delete_notification_rule
+from prediction import calculate_prediction
+from scheduler import run_daily_automation
 
-# --- 1. KONFIGURASI HALAMAN (WAJIB PALING ATAS) ---
 st.set_page_config(page_title="Period Tracker & Support", page_icon="🩸", layout="centered")
 
-# --- 2. PINTU RAHASIA UNTUK ROBOT (UPTIMEROBOT) ---
-# Kita cek apakah ada parameter '?task=run_daily' di URL
-query_params = st.query_params
+# === 1. FITUR SESSION TIMEOUT (5 MENIT) ===
+TIMEOUT_SECONDS = 5 * 60 # 5 Menit
 
-# Mengambil parameter task dengan aman
-task_param = query_params.get("task", None)
+if 'last_active' not in st.session_state:
+    st.session_state['last_active'] = time.time()
 
-if task_param == "run_daily":
-    st.write("🤖 Memulai Tugas Harian Robot...")
-    
-    status, pesan = run_daily_automation()
-    
-    if status == "SUKSES":
-        st.success(pesan)
-    elif status == "SUDAH_JALAN":
-        st.info(pesan)
+# Cek durasi inaktivitas
+current_time = time.time()
+if st.session_state.get('logged_in'):
+    if (current_time - st.session_state['last_active']) > TIMEOUT_SECONDS:
+        st.session_state['logged_in'] = False
+        st.session_state['user_info'] = None
+        st.error("Sesi habis karena tidak aktif selama 5 menit. Silakan login ulang.")
+        st.stop()
     else:
-        st.error(pesan)
-        
-    st.stop() # PENTING: Berhenti disini, jangan load tampilan UI
+        # Update waktu aktif jika user melakukan sesuatu
+        st.session_state['last_active'] = current_time
 
-# --- 3. JUDUL APLIKASI ---
+# === 2. PINTU RAHASIA SCHEDULER ===
+query_params = st.query_params
+if "task" in query_params and query_params["task"] == "run_daily":
+    st.write("🤖 Robot Scheduler Aktif...")
+    status, pesan = run_daily_automation()
+    st.write(f"Status: {status} | {pesan}")
+    st.stop()
+
+# --- INISIALISASI SESSION STATE ---
+if 'logged_in' not in st.session_state: st.session_state['logged_in'] = False
+if 'user_info' not in st.session_state: st.session_state['user_info'] = None
+
 st.title("🩸 Period Tracker System")
-st.caption("Tracking Siklus Haid & Support System Otomatis")
 
-# --- 4. MANAJEMEN SESI (SESSION STATE) ---
-if 'logged_in' not in st.session_state:
-    st.session_state['logged_in'] = False
-if 'user_info' not in st.session_state:
-    st.session_state['user_info'] = None
-
-# --- 5. LOGIKA TAMPILAN (LOGIN vs DASHBOARD) ---
-
+# === LOGIKA TAMPILAN ===
 if not st.session_state['logged_in']:
-    # === TAMPILAN BELUM LOGIN ===
+    # TAMPILAN LOGIN / REGISTER
     tab1, tab2 = st.tabs(["Login", "Register"])
     
-    # --- TAB LOGIN ---
     with tab1:
-        st.subheader("Masuk ke Akun")
         l_email = st.text_input("Email", key="l_email")
         l_pass = st.text_input("Password", type="password", key="l_pass")
-        
         if st.button("Login Masuk"):
             if l_email and l_pass:
                 user, msg = login_user(l_email, l_pass)
                 if user:
-                    st.success(f"Selamat datang, {user['full_name']}!")
+                    st.success(f"Welcome, {user['full_name']}!")
                     st.session_state['logged_in'] = True
                     st.session_state['user_info'] = user
-                    time.sleep(1)
+                    st.session_state['last_active'] = time.time() # Reset timer
                     st.rerun()
                 else:
                     st.error(msg)
             else:
-                st.warning("Harap isi email dan password.")
+                st.warning("Isi semua kolom.")
 
-    # --- TAB REGISTER ---
     with tab2:
-        st.subheader("Daftar Akun Baru")
-        r_name = st.text_input("Nama Panggilan", key="r_name")
-        r_email = st.text_input("Email", key="r_email")
-        r_pass = st.text_input("Password", type="password", key="r_pass")
-        
+        r_name = st.text_input("Nama Panggilan")
+        r_email = st.text_input("Email Pendaftaran")
+        r_pass = st.text_input("Buat Password", type="password")
         if st.button("Daftar Sekarang"):
             if r_name and r_email and r_pass:
                 success, msg = register_user(r_email, r_pass, r_name)
                 if success:
                     st.success(msg)
-                    st.info("Silakan pindah ke Tab Login untuk masuk.")
+                    st.info("Email kamu juga sudah otomatis didaftarkan sebagai penerima notifikasi.")
                 else:
                     st.error(msg)
             else:
-                st.warning("Semua kolom wajib diisi.")
+                st.warning("Wajib diisi semua.")
 
 else:
-    # === TAMPILAN SUDAH LOGIN (DASHBOARD) ===
+    # TAMPILAN DASHBOARD (LOGGED IN)
     user = st.session_state['user_info']
     
-    # --- INDIKATOR ADMIN MODE (NEW) ---
-    # Cek apakah ada flag 'is_admin_mode' di data user (Flag ini datang dari auth.py)
+    # Indikator Admin
     if user.get('is_admin_mode', False):
-        st.warning(f"⚠️ ADMIN ACCESS: Anda sedang mengakses akun milik {user['full_name']} ({user['username']})")
-        st.markdown("""
-        <style>
-        /* Mengubah border dashboard jadi merah biar sadar ini mode admin */
-        .stApp { border-top: 5px solid red; }
-        </style>
-        """, unsafe_allow_html=True)
+        st.warning(f"⚠️ ADMIN MODE: Mengakses akun {user['full_name']}")
     
-    # --- SIDEBAR ---
     with st.sidebar:
-        st.header(f"Halo, {user['full_name']}!")
-        st.write("---")
+        st.write(f"Halo, **{user['full_name']}** 👋")
         nav = st.radio("Menu", ["Dashboard", "Input Haid", "Settings"])
-        
         st.write("---")
-        if st.button("Logout", type="primary"):
+        if st.button("Logout"):
             st.session_state['logged_in'] = False
-            st.session_state['user_info'] = None
             st.rerun()
-            
-    # --- HALAMAN 1: DASHBOARD ---
+
+    # --- MENU 1: DASHBOARD ---
     if nav == "Dashboard":
-        st.header("📊 Dashboard & Prediksi")
-        
-        # Ambil data user
+        st.header("📊 Statistik & Prediksi")
         df = get_user_cycles(user['id'])
         
         if not df.empty:
-            # --- PANGGIL FUNGSI PREDIKSI DISINI ---
-            prediction = calculate_prediction(df)
+            pred = calculate_prediction(df)
             
-            # Tampilkan Card Prediksi Utama
-            st.markdown("### 🔮 Prediksi Haid Berikutnya")
+            # 1. KARTU PREDIKSI HAID
+            st.markdown("### 🔮 Jadwal Haid Berikutnya")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Tanggal Prediksi", pred['next_date'].strftime("%d %b %Y"))
+            with col2:
+                margin = pred['margin_error']
+                st.metric("Akurasi", f"± {margin} Hari", delta_color="normal" if margin < 3 else "inverse")
+            with col3:
+                st.metric("Rata-rata Siklus", f"{pred['cycle_avg']} Hari")
             
-            # Kita bagi jadi 3 kolom metrik
-            col_a, col_b, col_c = st.columns(3)
+            # 2. KARTU MASA SUBUR (NEW)
+            st.info(f"🌸 **Masa Subur (Ovulasi):** Diprediksi sekitar tanggal **{pred['ovulation_date'].strftime('%d %b %Y')}**.\n\n"
+                    f"Rentang paling subur: **{pred['fertile_window']}**.")
             
-            with col_a:
-                tanggal_indo = prediction['next_date'].strftime("%d %B %Y")
-                st.metric(label="Tanggal Prediksi", value=tanggal_indo)
-                
-            with col_b:
-                margin = prediction['margin_error']
-                delta_color = "normal" if margin < 3 else "inverse"
-                st.metric(label="Rentang Akurasi", value=f"± {margin} Hari", delta="Stabil" if margin < 3 else "Tidak Stabil", delta_color=delta_color)
-                
-            with col_c:
-                st.metric(label="Rata-rata Siklus", value=f"{prediction['cycle_avg']} Hari", help="Dihitung menggunakan metode EWMA")
-
-            st.caption(f"ℹ️ Metode Kalkulasi: *{prediction['method']}*")
             st.divider()
-
-            # --- BAGIAN BAWAH: DATA HISTORIS ---
-            col1, col2 = st.columns([2, 1])
             
-            with col1:
-                st.subheader("Tren Durasi Siklus")
-                df_sorted = df.sort_values('start_date', ascending=True).copy()
-                df_sorted['cycle_length'] = df_sorted['start_date'].diff().dt.days
-                st.line_chart(df_sorted.set_index('start_date')['cycle_length'])
-
-            with col2:
-                st.subheader("Riwayat Input")
-                st.dataframe(df[['start_date', 'mood']], use_container_width=True, height=300)
+            # 3. MANAJEMEN DATA (HAPUS PILIHAN)
+            st.subheader("Riwayat Data & Edit")
+            
+            # Trik Hapus Data: Pakai Checkbox di Dataframe
+            # Kita tambah kolom boolean 'Pilih'
+            df_display = df.copy()
+            df_display['Pilih'] = False
+            
+            # Tampilkan editor data
+            edited_df = st.data_editor(
+                df_display[['Pilih', 'start_date', 'end_date', 'mood', 'symptoms']],
+                column_config={
+                    "Pilih": st.column_config.CheckboxColumn("Hapus?", default=False),
+                    "start_date": st.column_config.DateColumn("Mulai"),
+                    "end_date": st.column_config.DateColumn("Selesai")
+                },
+                use_container_width=True,
+                hide_index=True,
+                key="data_editor"
+            )
+            
+            # Tombol Eksekusi Hapus
+            if st.button("🗑 Hapus Data Yang Dicentang"):
+                # Cari baris yang dicentang di edited_df
+                # Karena urutan sama, kita bisa ambil ID dari df asli berdasarkan index
+                rows_to_delete = edited_df[edited_df['Pilih'] == True].index.tolist()
                 
-                if st.button("Hapus Data Teratas"):
-                    cycle_id_to_delete = df.iloc[0]['id']
-                    success, msg = delete_cycle(cycle_id_to_delete)
+                if rows_to_delete:
+                    ids_to_delete = df.iloc[rows_to_delete]['id'].tolist()
+                    success, msg = delete_cycles_bulk(ids_to_delete)
                     if success:
                         st.success(msg)
-                        st.rerun()
-
-        else:
-            st.info("👋 Halo! Data kamu masih kosong. Silakan ke menu 'Input Haid' untuk mulai tracking.")
-            
-    # --- HALAMAN 2: INPUT DATA ---
-    elif nav == "Input Haid":
-        st.header("📝 Catat Haid Baru")
-        
-        with st.form("form_haid"):
-            col1, col2 = st.columns(2)
-            with col1:
-                start_date = st.date_input("Tanggal Mulai")
-            with col2:
-                end_date = st.date_input("Tanggal Selesai (Opsional)", value=None)
-            
-            symptoms = st.multiselect("Gejala yang dirasakan", 
-                ["Kram Perut", "Pusing", "Jerawat", "Nyeri Payudara", "Lelah", "Mual", "Sakit Punggung"])
-            
-            mood = st.selectbox("Mood Dominan", 
-                ["Senang/Biasa", "Sensitif/Mudah Marah", "Sedih/Melow", "Cemas", "Energik"])
-            
-            submit = st.form_submit_button("Simpan Data")
-            
-            if submit:
-                success, msg = create_cycle(user['id'], start_date, end_date, symptoms, mood)
-                if success:
-                    st.success(msg)
-                else:
-                    st.error(msg)
-
-    # --- HALAMAN 3: SETTINGS (SUPPORT SYSTEM) ---
-    elif nav == "Settings":
-        st.header("❤️ Support System & Notifikasi")
-        st.write("Daftarkan orang-orang terdekatmu agar mereka tahu kapan harus support kamu.")
-        
-        # --- TABEL DAFTAR PENERIMA ---
-        st.subheader("Daftar Penerima Aktif")
-        my_rules = get_user_notifications(user['id'])
-        
-        if my_rules:
-            clean_data = []
-            for item in my_rules:
-                clean_data.append({
-                    "Email Penerima": item['recipient_email'],
-                    "Sebagai": item['role'],
-                    "Dikirim H-": f"{item['days_before']} Hari",
-                    "Pesan Custom": item['custom_message']
-                })
-            st.table(clean_data)
-        else:
-            st.info("Belum ada support system.")
-
-        st.divider()
-
-        # --- FORM TAMBAH BARU ---
-        st.subheader("Tambah Kontak Baru")
-        with st.form("add_notif_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                rec_email = st.text_input("Email Penerima")
-                rec_role = st.selectbox("Sebagai Siapa?", ["Self", "Pacar", "Teman"])
-            with col2:
-                rec_days = st.number_input("Kirim Notifikasi H- Berapa?", min_value=0, max_value=7, value=3)
-                rec_msg = st.text_input("Pesan Tambahan (Opsional)")
-            
-            if st.form_submit_button("Simpan Kontak"):
-                if rec_email:
-                    success, msg = add_notification_rule(user['id'], rec_email, rec_role, rec_days, rec_msg)
-                    if success:
-                        st.success(msg)
+                        time.sleep(1)
                         st.rerun()
                     else:
                         st.error(msg)
                 else:
-                    st.warning("Email wajib diisi.")
+                    st.warning("Belum ada data yang dicentang.")
+                    
+        else:
+            st.info("Belum ada data. Yuk input dulu!")
+
+    # --- MENU 2: INPUT HAID ---
+    elif nav == "Input Haid":
+        st.header("📝 Catat Siklus Baru")
+        with st.form("form_haid"):
+            col1, col2 = st.columns(2)
+            # Mandatory Input
+            start_date = st.date_input("Tanggal Mulai *", value=None)
+            end_date = st.date_input("Tanggal Selesai *", value=None)
+            
+            symptoms = st.multiselect("Gejala", ["Kram", "Pusing", "Jerawat", "Mual", "Lelah", "Nyeri Pinggang"])
+            mood = st.selectbox("Mood", ["Biasa", "Senang", "Sedih", "Marah/Sensitif", "Cemas"])
+            
+            if st.form_submit_button("Simpan Data"):
+                # Validasi Mandatory
+                if start_date and end_date:
+                    if end_date < start_date:
+                        st.error("Tanggal Selesai tidak boleh sebelum Tanggal Mulai.")
+                    else:
+                        success, msg = create_cycle(user['id'], start_date, end_date, symptoms, mood)
+                        if success:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
+                else:
+                    st.error("⚠️ Tanggal Mulai dan Tanggal Selesai WAJIB diisi.")
+
+    # --- MENU 3: SETTINGS (EDIT NOTIFIKASI) ---
+    elif nav == "Settings":
+        st.header("⚙️ Support System (Notifikasi)")
+        
+        # 1. TABEL DAFTAR & EDIT
+        st.subheader("Kelola Daftar Penerima")
+        rules = get_user_notifications(user['id'])
+        
+        if rules:
+            df_rules = pd.DataFrame(rules)
+            # Setup editor agar kolom tertentu bisa diedit
+            edited_rules = st.data_editor(
+                df_rules[['id', 'recipient_email', 'role', 'days_before', 'custom_message']],
+                column_config={
+                    "id": None, # Sembunyikan ID
+                    "recipient_email": "Email Penerima (Read Only)",
+                    "role": st.column_config.SelectboxColumn("Role", options=["Self", "Pacar", "Teman"]),
+                    "days_before": st.column_config.NumberColumn("H- Berapa?", min_value=0, max_value=14),
+                    "custom_message": "Pesan Custom"
+                },
+                disabled=["recipient_email"], # Email gabisa diedit, harus hapus bikin baru
+                hide_index=True,
+                use_container_width=True,
+                key="rules_editor"
+            )
+            
+            col_act1, col_act2 = st.columns(2)
+            
+            # Tombol Simpan Perubahan
+            if col_act1.button("Simpan Perubahan Tabel"):
+                # Kita loop untuk update (sederhana)
+                # Note: Streamlit data editor mengembalikan state terbaru
+                # Untuk implementasi simple, kita asumsikan user edit lalu klik simpan.
+                # Kita cek perbedaan data atau update row by row (agak berat tapi aman)
+                
+                # Cara simple: Ambil ID dari edited_rules dan update valuenya ke DB
+                # Di versi simple ini, kita iterasi semua row yg tampil
+                errors = 0
+                for index, row in edited_rules.iterrows():
+                    # Update ke DB
+                    res = update_notification_rule(row['id'], row['role'], row['days_before'], row['custom_message'])
+                    if not res: errors += 1
+                
+                if errors == 0: st.success("Semua perubahan berhasil disimpan!")
+                else: st.warning("Beberapa data gagal update.")
+            
+            # Tombol Hapus (Manual Input ID karena Data Editor delete row butuh callback kompleks)
+            with col_act2:
+                with st.popover("Hapus Kontak"):
+                    rule_to_del = st.selectbox("Pilih Email untuk Dihapus", df_rules['recipient_email'])
+                    if st.button("Konfirmasi Hapus"):
+                        # Cari ID nya
+                        id_del = df_rules[df_rules['recipient_email'] == rule_to_del].iloc[0]['id']
+                        success, msg = delete_notification_rule(id_del)
+                        if success:
+                            st.rerun()
+                            
+        else:
+            st.info("Belum ada kontak terdaftar.")
 
         st.divider()
-        with st.expander("🛠 Test Kirim Email (Untuk Debugging)"):
-            test_email = st.text_input("Masukkan email tujuan test")
-            if st.button("Kirim Test Email"):
-                sukses, info = send_email_notification(test_email, "Test Dari Bot", "Halo! Ini tes email period tracker.")
-                if sukses:
-                    st.success("Email berhasil terkirim! Cek inbox/spam.")
-                else:
-                    st.error(f"Gagal: {info}")
+        
+        # 2. TAMBAH KONTAK BARU
+        st.subheader("Tambah Kontak Baru")
+        with st.form("add_contact"):
+            c_email = st.text_input("Email")
+            c_role = st.selectbox("Role", ["Self", "Pacar", "Teman"])
+            c_days = st.number_input("H- Berapa?", 1)
+            c_msg = st.text_input("Pesan")
+            
+            if st.form_submit_button("Tambah"):
+                if c_email:
+                    add_notification_rule(user['id'], c_email, c_role, c_days, c_msg)
+                    st.rerun()
