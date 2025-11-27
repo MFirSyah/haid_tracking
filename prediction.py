@@ -4,65 +4,63 @@ from datetime import timedelta
 
 def calculate_prediction(df):
     """
-    Menerima DataFrame history haid user.
-    Mengembalikan dictionary berisi tanggal prediksi, margin error, dan status.
+    Mengembalikan prediksi haid berikutnya DAN masa subur.
     """
     
-    # 1. PERSIAPAN DATA
-    # Pastikan data ada minimal 1 record
+    # PERSIAPAN DATA
     if df.empty:
         return None
     
-    # Urutkan dari tanggal terlama ke terbaru
     df = df.sort_values('start_date', ascending=True)
-    
-    # Hitung selisih hari antar haid (Cycle Length)
     df['cycle_length'] = df['start_date'].diff().dt.days
     
-    # Hapus baris pertama karena pasti NaN
+    # Bersihkan data (Hapus baris pertama yg NaT)
     valid_cycles = df.dropna(subset=['cycle_length'])
-    
     cycle_data = valid_cycles['cycle_length']
     last_period_date = df.iloc[-1]['start_date']
     
-    # --- LOGIKA 1: COLD START (DATA SEDIKIT) ---
+    # --- LOGIKA PREDIKSI SIKLUS (Sama seperti sebelumnya) ---
     if len(cycle_data) < 2:
-        predicted_days = 28
-        margin_error = 2 
+        predicted_cycle_days = 28
+        margin_error = 2
         method = "Medis Standar (Data Kurang)"
-        
     else:
-        # --- LOGIKA 2: HYBRID MODEL (DATA CUKUP) ---
-        
-        # A. IQR FILTER 
+        # IQR Filter
         Q1 = cycle_data.quantile(0.25)
         Q3 = cycle_data.quantile(0.75)
         IQR = Q3 - Q1
+        lower = Q1 - 1.5 * IQR
+        upper = Q3 + 1.5 * IQR
         
-        lower_bound = Q1 - 1.5 * IQR
-        upper_bound = Q3 + 1.5 * IQR
-        
-        clean_data = cycle_data[(cycle_data >= lower_bound) & (cycle_data <= upper_bound)]
-        
-        if clean_data.empty:
-            clean_data = cycle_data
+        clean_data = cycle_data[(cycle_data >= lower) & (cycle_data <= upper)]
+        if clean_data.empty: clean_data = cycle_data
             
-        # B. EWMA 
-        predicted_days = clean_data.ewm(span=3).mean().iloc[-1]
+        # EWMA
+        predicted_cycle_days = clean_data.ewm(span=3).mean().iloc[-1]
         
-        # C. STANDARD DEVIATION
         std_dev = clean_data.std()
         if np.isnan(std_dev): std_dev = 1.5
-        
         margin_error = round(std_dev)
         method = "Smart Hybrid AI"
 
-    # --- HASIL AKHIR ---
-    next_date = last_period_date + timedelta(days=round(predicted_days))
+    # --- HASIL PREDIKSI TANGGAL HAID ---
+    cycle_days_int = round(predicted_cycle_days)
+    next_period_date = last_period_date + timedelta(days=cycle_days_int)
+    
+    # --- LOGIKA MASA SUBUR (OVULASI) ---
+    # Ovulasi biasanya terjadi 14 hari SEBELUM haid berikutnya
+    ovulation_date = next_period_date - timedelta(days=14)
+    
+    # Masa subur (Fertile Window) biasanya H-2 sampai H+2 dari Ovulasi
+    fertile_start = ovulation_date - timedelta(days=2)
+    fertile_end = ovulation_date + timedelta(days=2)
     
     return {
-        "next_date": next_date.date(),
-        "cycle_avg": round(predicted_days),
+        "next_date": next_period_date.date(),
+        "cycle_avg": cycle_days_int,
         "margin_error": margin_error,
-        "method": method
+        "method": method,
+        # Data Baru: Masa Subur
+        "ovulation_date": ovulation_date.date(),
+        "fertile_window": f"{fertile_start.strftime('%d %b')} - {fertile_end.strftime('%d %b')}"
     }
