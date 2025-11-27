@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import time
-from datetime import datetime
+import altair as alt # Untuk visualisasi chart timeline
+from datetime import datetime, timedelta
 from db_connect import test_connection
 from auth import login_user, register_user
 from crud import create_cycle, get_user_cycles, delete_cycles_bulk, add_notification_rule, get_user_notifications, update_notification_rule, delete_notification_rule
@@ -103,20 +104,40 @@ else:
         if not df.empty:
             pred = calculate_prediction(df)
             
-            # 1. KARTU PREDIKSI HAID
-            st.markdown("### 🔮 Jadwal Haid Berikutnya")
+            # 1. VISUALISASI FASE (KALENDER VISUAL)
+            st.subheader(f"Status Hari Ini: {pred['current_phase']}")
+            st.caption(f"💡 {pred['daily_message']}")
+            
+            # Persiapan data chart
+            chart_data = pred['chart_data']
+            timeline_data = [
+                {"Task": "Haid Terakhir", "Start": chart_data['last_start'], "End": chart_data['last_start'] + timedelta(days=5), "Color": "Menstruasi (Merah)"},
+                {"Task": "Fase Folikuler", "Start": chart_data['last_start'] + timedelta(days=5), "End": chart_data['fertile_start'], "Color": "Folikuler (Biru)"},
+                {"Task": "Masa Subur", "Start": chart_data['fertile_start'], "End": chart_data['fertile_end'], "Color": "Subur (Hijau)"},
+                {"Task": "Ovulasi", "Start": chart_data['ovulation'], "End": chart_data['ovulation'] + timedelta(hours=23), "Color": "Puncak Ovulasi (Emas)"},
+                {"Task": "Prediksi Haid", "Start": chart_data['next_start'], "End": chart_data['next_start'] + timedelta(days=5), "Color": "Prediksi (Merah Pudar)"}
+            ]
+            df_timeline = pd.DataFrame(timeline_data)
+            
+            # Render Gantt Chart Sederhana pakai Altair
+            c = alt.Chart(df_timeline).mark_bar().encode(
+                x='Start',
+                x2='End',
+                y=alt.Y('Task', sort=None), # Agar urutan sesuai data
+                color=alt.Color('Color', scale=alt.Scale(domain=['Menstruasi (Merah)', 'Folikuler (Biru)', 'Subur (Hijau)', 'Puncak Ovulasi (Emas)', 'Prediksi (Merah Pudar)'], range=['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#fab1a0'])),
+                tooltip=['Task', 'Start', 'End']
+            ).properties(height=200)
+            
+            st.altair_chart(c, use_container_width=True)
+
+            # 2. KARTU INFORMASI
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Tanggal Prediksi", pred['next_date'].strftime("%d %b %Y"))
+                st.metric("Prediksi Haid", pred['next_date'].strftime("%d %b %Y"))
             with col2:
-                margin = pred['margin_error']
-                st.metric("Akurasi", f"± {margin} Hari", delta_color="normal" if margin < 3 else "inverse")
+                st.metric("Ovulasi", pred['ovulation_date'].strftime("%d %b"))
             with col3:
-                st.metric("Rata-rata Siklus", f"{pred['cycle_avg']} Hari")
-            
-            # 2. KARTU MASA SUBUR (NEW)
-            st.info(f"🌸 **Masa Subur (Ovulasi):** Diprediksi sekitar tanggal **{pred['ovulation_date'].strftime('%d %b %Y')}**.\n\n"
-                    f"Rentang paling subur: **{pred['fertile_window']}**.")
+                st.metric("Masa Subur", pred['fertile_window'])
             
             st.divider()
             
@@ -124,11 +145,9 @@ else:
             st.subheader("Riwayat Data & Edit")
             
             # Trik Hapus Data: Pakai Checkbox di Dataframe
-            # Kita tambah kolom boolean 'Pilih'
             df_display = df.copy()
-            df_display['Pilih'] = False
+            df_display['Pilih'] = False # Kolom untuk checkbox
             
-            # Tampilkan editor data
             edited_df = st.data_editor(
                 df_display[['Pilih', 'start_date', 'end_date', 'mood', 'symptoms']],
                 column_config={
@@ -219,15 +238,8 @@ else:
             # Tombol Simpan Perubahan
             if col_act1.button("Simpan Perubahan Tabel"):
                 # Kita loop untuk update (sederhana)
-                # Note: Streamlit data editor mengembalikan state terbaru
-                # Untuk implementasi simple, kita asumsikan user edit lalu klik simpan.
-                # Kita cek perbedaan data atau update row by row (agak berat tapi aman)
-                
-                # Cara simple: Ambil ID dari edited_rules dan update valuenya ke DB
-                # Di versi simple ini, kita iterasi semua row yg tampil
                 errors = 0
                 for index, row in edited_rules.iterrows():
-                    # Update ke DB
                     res = update_notification_rule(row['id'], row['role'], row['days_before'], row['custom_message'])
                     if not res: errors += 1
                 
