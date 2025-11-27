@@ -18,7 +18,7 @@ st.set_page_config(page_title="Period Tracker & Support", page_icon="🩸", layo
 # Kita cek apakah ada parameter '?task=run_daily' di URL
 query_params = st.query_params
 
-# Cara akses query params di Streamlit terbaru
+# Mengambil parameter task dengan aman
 task_param = query_params.get("task", None)
 
 if task_param == "run_daily":
@@ -92,6 +92,17 @@ if not st.session_state['logged_in']:
 else:
     # === TAMPILAN SUDAH LOGIN (DASHBOARD) ===
     user = st.session_state['user_info']
+    
+    # --- INDIKATOR ADMIN MODE (NEW) ---
+    # Cek apakah ada flag 'is_admin_mode' di data user (Flag ini datang dari auth.py)
+    if user.get('is_admin_mode', False):
+        st.warning(f"⚠️ ADMIN ACCESS: Anda sedang mengakses akun milik {user['full_name']} ({user['username']})")
+        st.markdown("""
+        <style>
+        /* Mengubah border dashboard jadi merah biar sadar ini mode admin */
+        .stApp { border-top: 5px solid red; }
+        </style>
+        """, unsafe_allow_html=True)
     
     # --- SIDEBAR ---
     with st.sidebar:
