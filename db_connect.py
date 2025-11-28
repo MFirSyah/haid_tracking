@@ -2,17 +2,18 @@ import streamlit as st
 import os
 from supabase import create_client, Client
 
-# Fungsi Helper untuk mengambil Secret (Support Streamlit & OS Env)
+# 1. Fungsi Helper Aman (Bisa baca Secrets Streamlit ATAU Environment Variable GitHub)
 def get_secret(key_parent, key_child):
-    # Coba ambil dari Streamlit Secrets (saat run lokal / streamlit cloud)
+    # Coba ambil dari Streamlit Secrets (Priority 1)
     try:
         return st.secrets[key_parent][key_child]
-    except:
-        # Jika gagal (berarti sedang jalan di GitHub Actions), ambil dari OS Environ
-        # Nanti di GitHub kita set nama variablenya: SUPABASE_URL, SUPABASE_KEY, dsb.
-        env_name = f"{key_parent.upper()}_{key_child.upper()}"
-        return os.environ.get(env_name)
+    except (FileNotFoundError, KeyError, AttributeError):
+        # Jika gagal, ambil dari OS Environment (Priority 2 - untuk GitHub Actions)
+        env_key = f"{key_parent.upper()}_{key_child.upper()}"
+        return os.environ.get(env_key)
 
+# 2. Inisialisasi Koneksi (Cached)
+# Kita gunakan try-except agar tidak error saat diimport
 @st.cache_resource
 def init_connection():
     try:
@@ -20,32 +21,38 @@ def init_connection():
         key = get_secret("supabase", "key")
         
         if not url or not key:
-            # Fallback manual jika cache bermasalah di script python biasa
-            return create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
+            return None
             
         return create_client(url, key)
     except Exception as e:
-        # Jika dijalankan di luar Streamlit (Script murni), st.error akan gagal
-        # Kita return None atau print error biasa
-        print(f"Koneksi DB Init Error: {e}")
+        print(f"Init DB Error: {e}")
         return None
 
-# Buat Client Global
-# Perbaikan logika: Jika dijalankan via GitHub Actions, @st.cache_resource tidak jalan
-# Jadi kita buat koneksi langsung
+# 3. Buat Variable Global 'supabase'
+# Logika: Coba pakai cache streamlit dulu, kalau gagal (misal di GitHub Actions), buat manual.
 try:
-    if st.runtime.exists():
-        supabase: Client = init_connection()
-    else:
-        # Mode Script (GitHub Actions)
-        _url = os.environ.get("SUPABASE_URL")
-        _key = os.environ.get("SUPABASE_KEY")
-        supabase: Client = create_client(_url, _key)
+    # Coba cara Streamlit
+    supabase: Client = init_connection()
 except:
-    # Fallback terakhir
+    # Coba cara Script Python biasa (Fallback)
     try:
         _url = os.environ.get("SUPABASE_URL")
         _key = os.environ.get("SUPABASE_KEY")
-        supabase: Client = create_client(_url, _key)
+        if _url and _key:
+            supabase: Client = create_client(_url, _key)
+        else:
+            supabase = None
     except:
         supabase = None
+
+# 4. FUNGSI TEST CONNECTION (Wajib Ada karena dipanggil main.py)
+def test_connection():
+    if supabase:
+        try:
+            # Coba query ringan (ambil 1 data user)
+            supabase.table("users").select("id").limit(1).execute()
+            return True, "Koneksi Berhasil! Database terhubung."
+        except Exception as e:
+            return False, f"Koneksi Gagal: {e}"
+    else:
+        return False, "Supabase Client belum terinisialisasi (Cek Secrets)."
