@@ -1,0 +1,63 @@
+name: Daily Period Tracker Bot
+
+on:
+  schedule:
+    # Jalan setiap hari jam 00:00 UTC (Jam 07:00 WIB)
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Supaya bisa di-klik manual tombol "Run" buat ngetes
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install Dependencies
+        run: |
+          pip install pandas supabase python-dateutil bcrypt
+          # Note: Kita TIDAK install streamlit agar cepat
+          
+      - name: Run Automation Script
+        env:
+          # Kita ambil rahasia dari GitHub Secrets
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          EMAIL_SENDER_EMAIL: ${{ secrets.EMAIL_SENDER_EMAIL }}
+          EMAIL_SENDER_PASSWORD: ${{ secrets.EMAIL_SENDER_PASSWORD }}
+        run: python automation_script.py
+
+### 5. Langkah Terakhir: Push & Setting Secrets
+
+Setelah kamu update kode (`db_connect`, `email_service`, `automation_script`) dan membuat folder `.github`:
+
+1.  **Push semua ke GitHub.**
+2.  Buka Repository GitHub kamu di browser.
+3.  Masuk ke **Settings** -> **Secrets and variables** -> **Actions**.
+4.  Klik **New repository secret**. Masukkan data-data dari `secrets.toml` kamu satu per satu:
+    * Name: `SUPABASE_URL`, Value: (URL Supabase kamu)
+    * Name: `SUPABASE_KEY`, Value: (Key Supabase Service Role kamu)
+    * Name: `EMAIL_SENDER_EMAIL`, Value: (Email Bot)
+    * Name: `EMAIL_SENDER_PASSWORD`, Value: (App Password Gmail 16 digit)
+5.  Simpan semuanya.
+
+### Cara Mengetes
+1.  Di GitHub, masuk ke tab **Actions**.
+2.  Di sebelah kiri, klik **Daily Period Tracker Bot**.
+3.  Di sebelah kanan, klik **Run workflow** -> **Run workflow**.
+4.  Tunggu sebentar (biasanya 30-60 detik).
+5.  Kalau sukses (centang hijau), cek log-nya. Dia akan menjalankan `automation_script.py`.
+6.  Cek email kamu, atau cek tabel `system_logs` di Supabase.
+
+Dengan cara ini:
+* Aplikasi UI Streamlit kamu boleh tidur nyenyak.
+* **Tapi Notifikasi Email akan selalu terkirim jam 7 pagi WIB** karena dijalankan oleh robot GitHub, bukan oleh Streamlit.
+* Ini solusi *Enterprise Grade* tapi gratis.
+
+Silakan dicoba Firman! Ini jauh lebih stabil daripada memaksakan UptimeRobot.
