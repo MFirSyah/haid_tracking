@@ -29,7 +29,7 @@ def calculate_prediction(df):
         margin_error = 2
         method = "Medis Standar"
     else:
-        # IQR Filter & EWMA Logic (Sama seperti sebelumnya)
+        # IQR Filter & EWMA Logic
         Q1 = cycle_data.quantile(0.25)
         Q3 = cycle_data.quantile(0.75)
         IQR = Q3 - Q1
@@ -53,7 +53,7 @@ def calculate_prediction(df):
     fertile_start = ovulation_date - timedelta(days=5)
     fertile_end = ovulation_date + timedelta(days=1)
     
-    # --- CEK FASE HARI INI (LOGIKA DIPERBAIKI) ---
+    # --- CEK FASE HARI INI ---
     today_ts = pd.to_datetime("today")
     today = today_ts.date()
     
@@ -68,13 +68,21 @@ def calculate_prediction(df):
     current_phase = "Fase Folikuler (Normal)"
     message = "Tubuhmu sedang bersiap untuk siklus baru."
     
+    # LOGIKA BARU: Tentukan Tanggal Selesai untuk Visualisasi Chart
+    # Jika user sudah input tanggal selesai, pakai itu.
+    # Jika belum (ongoing), pakai estimasi (misal Start + 5 hari) untuk visualisasi sementara.
+    if is_ongoing:
+        visual_last_end = last_start_date + timedelta(days=5)
+    else:
+        visual_last_end = last_end_date
+
     # 1. Cek apakah sedang haid (Ongoing atau dalam range tanggal)
     is_menstruating = False
     
     if is_ongoing:
         # Jika end_date kosong, cek apakah start_date baru saja terjadi (misal < 10 hari lalu)
         days_since_start = (today_ts - last_start_date).days
-        if 0 <= days_since_start <= 10:
+        if 0 <= days_since_start <= 14: # Diperlebar jadi 14 hari jaga-jaga haid panjang
             current_phase = "Sedang Haid (Menstruasi) 🩸"
             message = "Jangan lupa update tanggal selesai jika haid sudah berhenti ya!"
             is_menstruating = True
@@ -112,6 +120,7 @@ def calculate_prediction(df):
         "daily_message": message,
         "chart_data": {
             "last_start": last_start_date,
+            "last_end": visual_last_end, # INI YANG DIPERBAIKI (Pakai data real)
             "fertile_start": fertile_start,
             "fertile_end": fertile_end,
             "ovulation": ovulation_date,
