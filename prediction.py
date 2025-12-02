@@ -5,20 +5,21 @@ from datetime import timedelta, date
 def calculate_prediction(df):
     """
     Menghitung prediksi haid, ovulasi, dan masa subur.
-    Menangani kasus haid sedang berlangsung (end_date kosong).
+    Prioritas Visualisasi: Gunakan data aktual user jika ada, baru estimasi jika kosong.
     """
     if df.empty:
         return None
     
-    # Sort data
+    # 1. Pastikan urutan data benar (Start Date terlama ke terbaru)
     df = df.sort_values('start_date', ascending=True)
     
-    # Ambil data siklus terakhir (Raw Data) untuk cek status hari ini
+    # Ambil data siklus terakhir
     last_record = df.iloc[-1]
     last_start_date = last_record['start_date']
     last_end_date = last_record['end_date'] # Bisa NaT (Not a Time) / None
     
-    # Hitung durasi antar siklus (Cycle Length) untuk prediksi
+    # Hitung durasi antar siklus (Cycle Length) untuk prediksi bulan depan
+    # Logika: Siklus dihitung dari Start ke Start.
     df['cycle_length'] = df['start_date'].diff().dt.days
     valid_cycles = df.dropna(subset=['cycle_length'])
     cycle_data = valid_cycles['cycle_length']
@@ -49,10 +50,25 @@ def calculate_prediction(df):
     next_date = last_start_date + timedelta(days=avg_cycle)
     
     # --- HASIL MASA SUBUR (FERTILE WINDOW) ---
+    # Ovulasi terjadi 14 hari SEBELUM haid berikutnya
     ovulation_date = next_date - timedelta(days=14)
     fertile_start = ovulation_date - timedelta(days=5)
     fertile_end = ovulation_date + timedelta(days=1)
     
+    # --- LOGIKA VISUALISASI (PERBAIKAN DISINI) ---
+    # Cek apakah End Date valid (tidak NaT/None)
+    is_end_date_valid = pd.notnull(last_end_date)
+    
+    if is_end_date_valid:
+        # KASUS 1: User sudah input/edit tanggal selesai
+        visual_last_end = last_end_date
+        is_ongoing = False 
+    else:
+        # KASUS 2: Belum input tanggal selesai (Masih haid/lupa input)
+        # Estimasi default 5 hari visualisasi
+        visual_last_end = last_start_date + timedelta(days=5)
+        is_ongoing = True
+
     # --- CEK FASE HARI INI ---
     today_ts = pd.to_datetime("today")
     today = today_ts.date()
@@ -61,40 +77,28 @@ def calculate_prediction(df):
     fertile_start_d = fertile_start.date()
     fertile_end_d = fertile_end.date()
     last_start_d = last_start_date.date()
-    
-    # Handle end_date jika kosong (anggap belum selesai)
-    is_ongoing = pd.isnull(last_end_date)
-    
+    visual_last_end_d = visual_last_end.date()
+
     current_phase = "Fase Folikuler (Normal)"
     message = "Tubuhmu sedang bersiap untuk siklus baru."
     
-    # LOGIKA BARU: Tentukan Tanggal Selesai untuk Visualisasi Chart
-    # Jika user sudah input tanggal selesai, pakai itu.
-    # Jika belum (ongoing), pakai estimasi (misal Start + 5 hari) untuk visualisasi sementara.
-    if is_ongoing:
-        visual_last_end = last_start_date + timedelta(days=5)
-    else:
-        visual_last_end = last_end_date
-
-    # 1. Cek apakah sedang haid (Ongoing atau dalam range tanggal)
     is_menstruating = False
     
+    # Logika status teks
     if is_ongoing:
-        # Jika end_date kosong, cek apakah start_date baru saja terjadi (misal < 10 hari lalu)
+        # Jika belum ada end date, cek durasi hari berjalan
         days_since_start = (today_ts - last_start_date).days
-        if 0 <= days_since_start <= 14: # Diperlebar jadi 14 hari jaga-jaga haid panjang
+        if 0 <= days_since_start <= 14:
             current_phase = "Sedang Haid (Menstruasi) 🩸"
-            message = "Jangan lupa update tanggal selesai jika haid sudah berhenti ya!"
+            message = "Jangan lupa update tanggal selesai di tabel riwayat ya!"
             is_menstruating = True
     else:
-        # Jika end_date ada, cek apakah hari ini masih di antara start dan end
-        last_end_d = last_end_date.date()
-        if last_start_d <= today <= last_end_d:
+        # Jika sudah ada end date, cek range tanggal
+        if last_start_d <= today <= visual_last_end_d:
             current_phase = "Sedang Haid (Menstruasi) 🩸"
             message = "Istirahat yang cukup dan minum air putih."
             is_menstruating = True
 
-    # 2. Jika TIDAK haid, baru cek fase lain
     if not is_menstruating:
         if fertile_start_d <= today <= fertile_end_d:
             current_phase = "Masa Subur 🌸"
@@ -105,7 +109,7 @@ def calculate_prediction(df):
         elif today >= next_date_d - timedelta(days=3):
             current_phase = "Fase Luteal (PMS) ⚠️"
             message = "Mood mungkin agak berantakan menjelang haid."
-        elif today < fertile_start_d and today > last_start_d:
+        elif today < fertile_start_d and today > visual_last_end_d:
             current_phase = "Fase Folikuler 🌱"
             message = "Energi mulai naik setelah haid selesai."
 
@@ -120,7 +124,7 @@ def calculate_prediction(df):
         "daily_message": message,
         "chart_data": {
             "last_start": last_start_date,
-            "last_end": visual_last_end, # INI YANG DIPERBAIKI (Pakai data real)
+            "last_end": visual_last_end, # Ini sekarang pasti mengikuti inputan user jika ada
             "fertile_start": fertile_start,
             "fertile_end": fertile_end,
             "ovulation": ovulation_date,
