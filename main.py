@@ -33,7 +33,6 @@ if "task" in query_params and query_params["task"] == "run_daily":
     st.stop()
 
 # --- HELPER FUNCTION: TABLE RIWAYAT EDITABLE ---
-# Fungsi ini dipakai di Dashboard DAN di Input Haid agar sinkron
 def render_history_table(df, key_prefix="dash"):
     st.subheader("📝 Riwayat & Edit Data")
     
@@ -41,15 +40,13 @@ def render_history_table(df, key_prefix="dash"):
         st.info("Belum ada data.")
         return
 
-    # Persiapan DataFrame untuk Editor
     df_display = df.copy()
     df_display['Pilih'] = False 
     
-    # Tampilkan Data Editor
     edited_df = st.data_editor(
         df_display[['Pilih', 'id', 'start_date', 'end_date', 'mood', 'symptoms']],
         column_config={
-            "id": None, # Sembunyikan ID
+            "id": None, 
             "Pilih": st.column_config.CheckboxColumn("Hapus?", default=False),
             "start_date": st.column_config.DateColumn("Mulai", format="DD/MM/YYYY"),
             "end_date": st.column_config.DateColumn("Selesai", format="DD/MM/YYYY"),
@@ -63,29 +60,21 @@ def render_history_table(df, key_prefix="dash"):
 
     col_btn1, col_btn2 = st.columns([1, 1])
 
-    # TOMBOL 1: SIMPAN PERUBAHAN (UPDATE)
     with col_btn1:
         if st.button("💾 Simpan Perubahan Tabel", key=f"{key_prefix}_save"):
             updated_count = 0
-            # Bandingkan data lama vs baru
-            # Loop iterrows agak lambat tapi aman untuk skala kecil
             for index, row in edited_df.iterrows():
-                # Ambil data asli berdasarkan ID untuk cek perubahan
                 original_row = df[df['id'] == row['id']].iloc[0]
                 
-                # Cek apakah ada yg beda (Tanggal/Mood/Gejala)
-                # Convert tanggal ke date object untuk perbandingan yg adil
                 new_start = row['start_date'].date() if hasattr(row['start_date'], 'date') else row['start_date']
                 old_start = original_row['start_date'].date() if hasattr(original_row['start_date'], 'date') else original_row['start_date']
                 
-                # Handle end_date (bisa NaT/None)
                 new_end = row['end_date']
                 if pd.notnull(new_end) and hasattr(new_end, 'date'): new_end = new_end.date()
                 
                 old_end = original_row['end_date']
                 if pd.notnull(old_end) and hasattr(old_end, 'date'): old_end = old_end.date()
                 
-                # Logika cek perubahan
                 is_changed = (new_start != old_start) or \
                              (pd.isna(new_end) != pd.isna(old_end)) or \
                              (pd.notnull(new_end) and pd.notnull(old_end) and new_end != old_end) or \
@@ -93,7 +82,6 @@ def render_history_table(df, key_prefix="dash"):
                              (row['symptoms'] != original_row['symptoms'])
 
                 if is_changed:
-                    # Update ke DB
                     update_cycle_safe(row['id'], row['start_date'], row['end_date'], row['mood'], row['symptoms'])
                     updated_count += 1
             
@@ -104,7 +92,6 @@ def render_history_table(df, key_prefix="dash"):
             else:
                 st.info("Tidak ada perubahan data yang terdeteksi.")
 
-    # TOMBOL 2: HAPUS (DELETE)
     with col_btn2:
         if st.button("🗑 Hapus Data Dicentang", key=f"{key_prefix}_del"):
             rows_to_delete = edited_df[edited_df['Pilih'] == True]
@@ -167,28 +154,29 @@ else:
         if not df.empty:
             pred = calculate_prediction(df)
             
-            # Info Fase
             st.info(f"**Status:** {pred['current_phase']} | {pred['daily_message']}")
             
-            # Gantt Chart dengan Grid
             chart_data = pred['chart_data']
+            
+            # LOGIKA VISUALISASI DIPERBAIKI DISINI
+            # 'last_end' sekarang mengambil data asli dari DB (jika ada) atau prediksi (jika ongoing)
             timeline_data = [
-                {"Task": "Haid Terakhir", "Start": chart_data['last_start'], "End": chart_data['last_start'] + timedelta(days=5), "Color": "Menstruasi (Merah)"},
-                {"Task": "Fase Folikuler", "Start": chart_data['last_start'] + timedelta(days=5), "End": chart_data['fertile_start'], "Color": "Folikuler (Biru)"},
+                {"Task": "Haid Terakhir", "Start": chart_data['last_start'], "End": chart_data['last_end'], "Color": "Menstruasi (Merah)"},
+                {"Task": "Fase Folikuler", "Start": chart_data['last_end'], "End": chart_data['fertile_start'], "Color": "Folikuler (Biru)"},
                 {"Task": "Masa Subur", "Start": chart_data['fertile_start'], "End": chart_data['fertile_end'], "Color": "Subur (Hijau)"},
                 {"Task": "Ovulasi", "Start": chart_data['ovulation'], "End": chart_data['ovulation'] + timedelta(hours=23), "Color": "Puncak Ovulasi (Emas)"},
                 {"Task": "Prediksi Haid", "Start": chart_data['next_start'], "End": chart_data['next_start'] + timedelta(days=5), "Color": "Prediksi (Merah Pudar)"}
             ]
+            
             c = alt.Chart(pd.DataFrame(timeline_data)).mark_bar().encode(
-                x=alt.X('Start', axis=alt.Axis(grid=True)), # Grid Vertikal
+                x=alt.X('Start', axis=alt.Axis(grid=True, title="Tanggal")), 
                 x2='End',
-                y=alt.Y('Task', sort=None, axis=alt.Axis(grid=True)), # Grid Horizontal
+                y=alt.Y('Task', sort=None, axis=alt.Axis(grid=True)),
                 color=alt.Color('Color', scale=alt.Scale(domain=['Menstruasi (Merah)', 'Folikuler (Biru)', 'Subur (Hijau)', 'Puncak Ovulasi (Emas)', 'Prediksi (Merah Pudar)'], range=['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#fab1a0'])),
                 tooltip=['Task', 'Start', 'End']
             ).properties(height=250)
             st.altair_chart(c, use_container_width=True)
 
-            # Metric Cards
             c1, c2, c3 = st.columns(3)
             c1.metric("Prediksi Haid", pred['next_date'].strftime("%d %b"))
             c2.metric("Ovulasi", pred['ovulation_date'].strftime("%d %b"))
@@ -196,7 +184,6 @@ else:
             
             st.divider()
             
-            # Panggil Tabel Riwayat (Shared Function)
             render_history_table(df, key_prefix="dash_hist")
             
         else:
@@ -206,10 +193,8 @@ else:
     elif nav == "Input Haid":
         st.header("📝 Catat Siklus Baru")
         
-        # Form Input Atas
         with st.form("form_haid"):
             c1, c2 = st.columns(2)
-            # Tanggal Mulai Wajib, Selesai Boleh Kosong (Ongoing)
             start_date = st.date_input("Tanggal Mulai *", value=None)
             end_date = st.date_input("Tanggal Selesai (Kosongkan jika masih haid)", value=None)
             
@@ -218,7 +203,6 @@ else:
             
             if st.form_submit_button("Simpan Data Baru"):
                 if start_date:
-                    # Validasi tanggal
                     if end_date and end_date < start_date:
                         st.error("Tanggal selesai tidak boleh sebelum tanggal mulai.")
                     else:
@@ -232,9 +216,6 @@ else:
                     st.error("Tanggal Mulai wajib diisi!")
 
         st.divider()
-        
-        # Tampilkan Tabel Riwayat (Sama dengan Dashboard)
-        # Ambil data terbaru dulu
         df_fresh = get_user_cycles(user['id'])
         render_history_table(df_fresh, key_prefix="input_hist")
 
@@ -243,7 +224,6 @@ else:
         st.header("⚙️ Support System")
         rules = get_user_notifications(user['id'])
         
-        # Table Editor Notifikasi
         if rules:
             df_rules = pd.DataFrame(rules)
             edited_rules = st.data_editor(
