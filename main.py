@@ -35,6 +35,7 @@ if "task" in query_params and query_params["task"] == "run_daily":
 # --- HELPER FUNCTION: TABLE RIWAYAT EDITABLE ---
 def render_history_table(df, key_prefix="dash"):
     st.subheader("📝 Riwayat & Edit Data")
+    st.caption("Ubah tanggal di tabel ini lalu klik 'Simpan' untuk memperbarui grafik prediksi.")
     
     if df.empty:
         st.info("Belum ada data.")
@@ -86,11 +87,11 @@ def render_history_table(df, key_prefix="dash"):
                     updated_count += 1
             
             if updated_count > 0:
-                st.success(f"{updated_count} data berhasil diupdate!")
+                st.success(f"{updated_count} data diperbarui! Grafik sedang dihitung ulang...")
                 time.sleep(1)
-                st.rerun()
+                st.rerun() 
             else:
-                st.info("Tidak ada perubahan data yang terdeteksi.")
+                st.info("Tidak ada perubahan data.")
 
     with col_btn2:
         if st.button("🗑 Hapus Data Dicentang", key=f"{key_prefix}_del"):
@@ -149,25 +150,42 @@ else:
     # --- 1. DASHBOARD ---
     if nav == "Dashboard":
         st.header("📊 Dashboard")
+        
+        # Ambil data terbaru dari DB
         df = get_user_cycles(user['id'])
         
         if not df.empty:
+            # Hitung prediksi berdasarkan data terbaru
             pred = calculate_prediction(df)
             
             st.info(f"**Status:** {pred['current_phase']} | {pred['daily_message']}")
             
             chart_data = pred['chart_data']
             
-            # LOGIKA VISUALISASI DIPERBAIKI DISINI
-            # 'last_end' sekarang mengambil data asli dari DB (jika ada) atau prediksi (jika ongoing)
+            # --- LOGIKA CHART YANG LEBIH CERDAS ---
+            # Menggunakan visual_last_end yang sudah diperbaiki di prediction.py
+            mens_start = chart_data['last_start']
+            mens_end = chart_data['last_end']
+            
+            # Bar Biru (Folikuler) dimulai tepat setelah Bar Merah selesai
+            fol_start = mens_end
+            fol_end = chart_data['fertile_start']
+            
+            # Validasi visual: Folikuler hanya muncul jika ada celah antara Haid dan Masa Subur
+            show_follicular = fol_end > fol_start
+            
             timeline_data = [
-                {"Task": "Haid Terakhir", "Start": chart_data['last_start'], "End": chart_data['last_end'], "Color": "Menstruasi (Merah)"},
-                {"Task": "Fase Folikuler", "Start": chart_data['last_end'], "End": chart_data['fertile_start'], "Color": "Folikuler (Biru)"},
+                {"Task": "Haid Terakhir", "Start": mens_start, "End": mens_end, "Color": "Menstruasi (Merah)"},
+                {"Task": "Fase Folikuler", "Start": fol_start, "End": fol_end, "Color": "Folikuler (Biru)"} if show_follicular else None,
                 {"Task": "Masa Subur", "Start": chart_data['fertile_start'], "End": chart_data['fertile_end'], "Color": "Subur (Hijau)"},
                 {"Task": "Ovulasi", "Start": chart_data['ovulation'], "End": chart_data['ovulation'] + timedelta(hours=23), "Color": "Puncak Ovulasi (Emas)"},
                 {"Task": "Prediksi Haid", "Start": chart_data['next_start'], "End": chart_data['next_start'] + timedelta(days=5), "Color": "Prediksi (Merah Pudar)"}
             ]
             
+            # Bersihkan None
+            timeline_data = [item for item in timeline_data if item is not None]
+            
+            # Render Chart
             c = alt.Chart(pd.DataFrame(timeline_data)).mark_bar().encode(
                 x=alt.X('Start', axis=alt.Axis(grid=True, title="Tanggal")), 
                 x2='End',
@@ -184,10 +202,11 @@ else:
             
             st.divider()
             
+            # Table Editor (Untuk mengubah tanggal jika salah input)
             render_history_table(df, key_prefix="dash_hist")
             
         else:
-            st.info("Data kosong.")
+            st.info("Data kosong. Silakan input data haid pertama Anda.")
 
     # --- 2. INPUT HAID ---
     elif nav == "Input Haid":
@@ -216,6 +235,7 @@ else:
                     st.error("Tanggal Mulai wajib diisi!")
 
         st.divider()
+        # Tabel Riwayat juga ada disini biar user bisa revisi langsung
         df_fresh = get_user_cycles(user['id'])
         render_history_table(df_fresh, key_prefix="input_hist")
 
