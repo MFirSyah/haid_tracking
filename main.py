@@ -162,16 +162,13 @@ else:
             
             chart_data = pred['chart_data']
             
-            # --- LOGIKA CHART YANG LEBIH CERDAS ---
-            # Menggunakan visual_last_end yang sudah diperbaiki di prediction.py
+            # --- LOGIKA CHART GANTT ---
             mens_start = chart_data['last_start']
             mens_end = chart_data['last_end']
             
-            # Bar Biru (Folikuler) dimulai tepat setelah Bar Merah selesai
             fol_start = mens_end
             fol_end = chart_data['fertile_start']
             
-            # Validasi visual: Folikuler hanya muncul jika ada celah antara Haid dan Masa Subur
             show_follicular = fol_end > fol_start
             
             timeline_data = [
@@ -185,7 +182,7 @@ else:
             # Bersihkan None
             timeline_data = [item for item in timeline_data if item is not None]
             
-            # Render Chart
+            # Render Gantt Chart
             c = alt.Chart(pd.DataFrame(timeline_data)).mark_bar().encode(
                 x=alt.X('Start', axis=alt.Axis(grid=True, title="Tanggal")), 
                 x2='End',
@@ -195,11 +192,56 @@ else:
             ).properties(height=250)
             st.altair_chart(c, use_container_width=True)
 
+            # --- REQUEST 1: TABEL RINCIAN TANGGAL DI BAWAH CHART ---
+            with st.expander("📅 Lihat Rincian Tanggal Fase", expanded=True):
+                # Buat DataFrame dari timeline_data untuk ditampilkan rapi
+                df_timeline = pd.DataFrame(timeline_data)
+                # Format tanggal agar enak dibaca (01 Jan 2025)
+                df_timeline['Mulai'] = df_timeline['Start'].apply(lambda x: x.strftime('%d %b %Y'))
+                df_timeline['Selesai'] = df_timeline['End'].apply(lambda x: x.strftime('%d %b %Y'))
+                
+                # Tampilkan tabel statis (Fase | Mulai | Selesai)
+                st.table(df_timeline[['Task', 'Mulai', 'Selesai']])
+
+            st.divider()
+
+            # Metric Cards
             c1, c2, c3 = st.columns(3)
             c1.metric("Prediksi Haid", pred['next_date'].strftime("%d %b"))
             c2.metric("Ovulasi", pred['ovulation_date'].strftime("%d %b"))
             c3.metric("Masa Subur", pred['fertile_window'])
             
+            st.divider()
+
+            # --- REQUEST 2: LINE CHART GRAFIK SIKLUS ---
+            st.subheader("📈 Tren Panjang Siklus")
+            
+            # Olah data untuk mendapatkan panjang siklus (diff start date)
+            df_sorted = df.sort_values('start_date', ascending=True).copy()
+            df_sorted['cycle_days'] = df_sorted['start_date'].diff().dt.days
+            
+            # Hapus baris pertama (NaN karena tidak ada sebelumnya)
+            df_chart = df_sorted.dropna(subset=['cycle_days'])
+            
+            if len(df_chart) > 0:
+                # Format tanggal untuk sumbu X
+                df_chart['Bulan'] = df_chart['start_date'].dt.strftime('%b %Y')
+                
+                # Grafik Garis dengan Titik (Altair)
+                line_chart = alt.Chart(df_chart).mark_line(point=True).encode(
+                    x=alt.X('start_date', axis=alt.Axis(title='Tanggal Haid', format='%b %Y')),
+                    y=alt.Y('cycle_days', axis=alt.Axis(title='Durasi Siklus (Hari)')),
+                    tooltip=[
+                        alt.Tooltip('start_date', title='Tanggal Haid', format='%d %b %Y'),
+                        alt.Tooltip('cycle_days', title='Panjang Siklus (Hari)')
+                    ]
+                ).properties(height=300)
+                
+                st.altair_chart(line_chart, use_container_width=True)
+                st.caption("Grafik ini menunjukkan jarak hari antara satu haid ke haid berikutnya. Grafik yang stabil (datar) menandakan siklus teratur.")
+            else:
+                st.info("Butuh minimal 2 data haid untuk menampilkan grafik tren siklus.")
+
             st.divider()
             
             # Table Editor (Untuk mengubah tanggal jika salah input)
