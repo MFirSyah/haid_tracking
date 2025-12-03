@@ -244,6 +244,10 @@ else:
                 with st.expander("📅 Lihat Rincian Durasi Siklus", expanded=True):
                     # Persiapkan data tabel
                     df_table_cycle = df_chart[['start_date', 'cycle_days']].copy()
+                    
+                    # FIX: Format ke integer agar tidak ada desimal (misal 31.0000 -> 31)
+                    df_table_cycle['cycle_days'] = df_table_cycle['cycle_days'].astype(int)
+
                     df_table_cycle['Tanggal Haid'] = df_table_cycle['start_date'].dt.strftime('%d %b %Y')
                     df_table_cycle.rename(columns={'cycle_days': 'Durasi (Hari)'}, inplace=True)
                     
