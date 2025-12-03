@@ -239,6 +239,17 @@ else:
                 
                 st.altair_chart(line_chart, use_container_width=True)
                 st.caption("Grafik ini menunjukkan jarak hari antara satu haid ke haid berikutnya. Grafik yang stabil (datar) menandakan siklus teratur.")
+                
+                # --- TAMBAHAN REQUEST 2: TABEL RINCIAN GRAFIK LINE ---
+                with st.expander("📅 Lihat Rincian Durasi Siklus", expanded=True):
+                    # Persiapkan data tabel
+                    df_table_cycle = df_chart[['start_date', 'cycle_days']].copy()
+                    df_table_cycle['Tanggal Haid'] = df_table_cycle['start_date'].dt.strftime('%d %b %Y')
+                    df_table_cycle.rename(columns={'cycle_days': 'Durasi (Hari)'}, inplace=True)
+                    
+                    # Tampilkan
+                    st.table(df_table_cycle[['Tanggal Haid', 'Durasi (Hari)']])
+
             else:
                 st.info("Butuh minimal 2 data haid untuk menampilkan grafik tren siklus.")
 
